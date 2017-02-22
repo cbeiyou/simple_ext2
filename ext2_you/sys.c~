@@ -1,0 +1,293 @@
+#include <string.h>
+#include <stdio.h>
+#include <limits.h>
+#include "/home/bei/ext2_you/include/tou.h"
+#include "/home/bei/ext2_you/include/file.h"
+
+struct task_struct task_struct;
+struct fs_struct fs_struct;
+struct inode root;
+struct inode pwd;
+struct files_struct files_struct ;
+struct file sys_open[100];
+struct inode sys_inode[100];
+//struct file_operations file_operations;
+
+void init(){
+
+    memset(&task_struct,'\0',sizeof(struct task_struct));
+    memset(&fs_struct,'\0',sizeof(struct fs_struct));
+    memset(&root,'\0',sizeof(struct inode));
+    memset(&pwd,'\0',sizeof(struct inode));
+    memset(&files_struct,'\0',sizeof(struct files_struct));
+    memset(sys_open,'\0',sizeof(struct file)*100);
+    memset(sys_inode,'\0',sizeof(struct inode)*100);
+   // memset(&file_operations,'\0',sizeof(struct file_operations));
+
+    task_struct.fs=&fs_struct;
+    task_struct.files=&files_struct;
+
+    root.i_number=new_inode();
+    printf("root_i_number  = %d\n",root.i_number);
+    pwd.i_number=root.i_number;
+    root.ext2_inode.i_block[0]=new_block();
+    root.ext2_inode.i_blocks=1;
+    //初始化root目录文件和pwd文件所占块数和确定root文件指向哪几个数据块
+    pwd.ext2_inode.i_block[0]=root.ext2_inode.i_block[0];
+    pwd.ext2_inode.i_blocks=1;
+/*
+    char buffer[1024];
+    struct ext2_dir_entry_2 *dentry;
+    dentry = (struct ext2_dir_entry_2 *)buffer;
+    dentry->inode = root.i_number;
+    dentry->rec_len = 10;
+    dentry->name_len = 10;
+    dentry->file_type = 0x1666;
+    strcpy(dentry->name,"root");
+    set_block_data(root.ext2_inode.i_block[0],buffer);
+*/
+    fs_struct.pwd=&pwd;
+    fs_struct.root=&root;
+}
+
+
+int get_free_inode(){
+    int i=0;
+    for (i=0;i<100;i++)
+    {
+        if(sys_inode[i].i_number ==0) return i;
+    }
+    return -1;
+}
+
+int get_free_file(){
+    int i=0;
+    for (i=0;i<100;i++)
+    {
+        if(sys_open[i].f_inode==NULL) return i;
+    }
+    return -1;
+}
+
+int get_free_task_file(){
+    int i=0;
+    for (i=0;i<100;i++)
+    {
+        if(files_struct.fd[i]==NULL) return i;
+    }
+    return -1;
+}
+
+int sys_openfile(char *path){
+    int free_inode=get_free_inode();
+    if (free_inode==-1){
+        printf("系统打开inode表 full\n");
+        return 0;
+    }
+	printf("free_inode = %d\n",free_inode);
+    struct inode * temp_inode = name_find_inode(path,sys_inode+free_inode);
+    int i;
+    //通过name_find_inode找到该文件对应的inode，将其链接到sys_inode上面；
+    for(i=0;i<free_inode;i++)
+    {
+        if(sys_inode[i].i_number==sys_inode[free_inode].i_number){
+            printf("该文件已打开，inode为：%d\n",sys_inode[i].i_number);
+            sys_inode[free_inode].i_number=0;
+            free_inode=i;
+        }
+    }
+    sys_inode[free_inode].i_count++;
+    //在系统文件表中找到空位置，确定该位置为放置该文件的位置，置该sys_open的f_inode数据。
+    int free_file=get_free_file();
+    if(free_file==-1){
+        printf("系统打开file表 full\n");
+        return 0;
+    }
+    sys_open[free_file].f_inode=sys_inode+free_inode;
+    //在用户打开文件表中确定一个空的描述符位置，使该处链接系统打开file表。
+    int free_task_file=get_free_task_file();
+    if (free_task_file==-1){
+        printf("该进程打开文件表 full\n");
+        return 0;
+    }
+    files_struct.fd[free_task_file]=sys_open+free_file;
+    return free_task_file;
+}
+
+
+int sys_close(int fd){
+    files_struct.fd[fd]->f_inode->i_count--;
+    if (files_struct.fd[fd]->f_inode->i_count<=0){
+        files_struct.fd[fd]->f_inode->i_number=0;
+        files_struct.fd[fd]->f_inode=NULL;
+        files_struct.fd[fd]=NULL;
+    }
+}
+
+int sys_create(char *name,int len,int mode){
+    int free_inode=get_free_inode();
+    if(free_inode==-1){
+        printf("create error\n");
+        return 0 ;
+    }
+    struct inode* temp_inode=sys_inode+free_inode;
+    create(&pwd,name,len,mode);
+
+    int free_file=get_free_file();
+    if(free_file==-1){
+        printf("get_free_file error\n");
+        return 0;
+    }
+    sys_open[free_file].f_inode=sys_inode+free_inode;
+    int free_task_file=get_free_task_file();
+    if(free_task_file==-1){
+        printf("free_task_file error\n");
+        return 0;
+    }
+    files_struct.fd[free_task_file]=sys_open+free_file;
+    return free_task_file;
+}
+
+
+int sys_write(int fd,char *buffer,int count){
+    struct inode* w_inode;
+    w_inode=files_struct.fd[fd]->f_inode;
+    struct file* w_file;
+    w_file=files_struct.fd[fd];
+
+   // if (w_inode->ext2_inode.i_mode){
+    //    printf("文件不可写\n");
+     //   return 0;
+    //}
+    if(count==0){
+        printf("count 为0\n");
+        return 0 ;
+    }
+
+    int i,j,all_write_num;
+    all_write_num=w_file->f_pos+count;
+    printf("all_write_num = %d\n",all_write_num);
+    char *w_buffer = (char *)malloc(all_write_num);
+    if(w_buffer==NULL){
+        printf("malloc error\n");
+        return 0;
+    }
+
+    int num = u_read(w_inode,w_file,w_buffer,w_file->f_pos);
+printf("num = %d\n",num);
+    for(i=0;i<count;i++){
+        w_buffer[i+w_file->f_pos]=buffer[i];
+    }
+	printf("w_buffer = %s \n",w_buffer);
+    //准备好需要写入的消息，接着对这个文件对应的block块进行初始化；释放所在的block
+    for (i=0;i<w_inode->ext2_inode.i_blocks;i++){
+        free_block(w_inode->ext2_inode.i_block[i]);
+    }
+
+    //在每次写入数据之前，都需要将当前写入的block在位图上面置1，表示该block已占用。
+    //文件写入磁盘的时候是自动寻找未被占用的block，所以一个文件并不是挨着block存放的，也有可能是分开存放。
+    for (i=0,j=0;i<all_write_num;i+=BLOCK_SIZE,j++){
+        unsigned int temp_block;
+        temp_block=new_block();
+        w_inode->ext2_inode.i_block[j]=temp_block;
+        set_block_data(temp_block,w_buffer+i);
+    }
+
+    free(w_buffer);
+    w_file->f_pos=all_write_num;
+    w_inode->ext2_inode.i_size=all_write_num;
+    w_inode->ext2_inode.i_blocks=j;
+	//printf("sdvds\n");
+    /*char buf[128];
+    struct inode* buf_inode;
+    buf_inode = (struct inode *)buf;
+    buf_inode->i_number = w_inode->i_number;
+    buf_inode->i_count = w_inode->i_count;
+    buf_inode->ext2_inode.i_mode = w_inode->ext2_inode.i_mode;
+    buf_inode->ext2_inode.i_blocks = w_inode->ext2_inode.i_blocks;
+    for (i=0;i<buf_inode->ext2_inode.i_blocks;i++)
+        buf_inode->ext2_inode.i_block[i] = w_inode->ext2_inode.i_block[i];*/
+    set_inode_data(w_inode->i_number,w_inode);
+    return count;
+}
+
+const int  find_position(__u32 f_pos,__u32 *num,__u32 *offset){
+    *num=f_pos/BLOCK_SIZE;
+    *offset=f_pos%BLOCK_SIZE;
+    return 0;
+}
+
+int sys_read(int fd,char *buffer,int count ){
+   return  u_read(files_struct.fd[fd]->f_inode,files_struct.fd[fd],buffer,count);
+}
+
+int u_read(struct inode *r_inode,struct file* r_file,char *r_buffer,int count){
+    //if (r_inode->ext2_inode.i_mode && RDONLY ==0){
+    //    printf("文件不可读\n");
+    //    return 0;
+    //}
+    if(!r_inode || !r_file || !r_buffer ){
+        return 0;
+    }
+    //读操作首先找到该文件所在块号，所在块的偏移，然后结合需要读的count，来计算需要往后面 读多少个block，然后通过for循环读count的数据。
+
+    int i;
+    __u32 block_num,block_offset;
+    find_position(r_file->f_pos,&block_num,&block_offset);//找到文件当前的偏移量所在的block块号和block块内的偏移。
+    int block_ok = (count+block_offset)/1024+1;
+    char *u_buffer = (char *)malloc(block_ok*1024);
+    if(!u_buffer){
+        printf("malloc error\n");
+        return 0;
+    }
+    //在确定了当前块号，并且当前块内偏移之后，就把需要读的那些块的数据读在r_buffer里面，最后通过block_offset把用户需要的数据读到buffer里面
+    for (i=block_num;i<block_num+block_ok;i++){
+        get_block_data(r_inode->ext2_inode.i_block[i],u_buffer+i*BLOCK_SIZE);
+    }
+
+    for (i=0;i<count;i++)
+        r_buffer[i]=u_buffer[i+block_offset];
+
+    free(u_buffer);
+    r_file->f_pos+=count;
+    return count;
+}
+
+
+int sys_lseek(int fd,int offset,int flag){
+    return u_lseek(files_struct.fd[fd]->f_inode,files_struct.fd[fd],offset,flag);
+}
+
+int u_lseek(struct inode* l_inode,struct file* l_file,int offset,int flag){
+    if(!l_file || !l_inode) return -1;
+    if (flag==0){
+        l_file->f_pos=offset;
+    }
+    if (flag==1){
+        l_file->f_pos+=offset;
+    }
+    if (flag==2){
+        l_file->f_pos=l_inode->ext2_inode.i_size+offset;
+    }
+    return l_file->f_pos;
+}
+
+int sys_mkdir (char *name,int len,int mode){
+    return u_mkdir(&pwd,name,len,mode);
+}
+
+int main(){
+	init();
+	list_all(&pwd);
+	printf("ok\n");
+	sys_create("file2",5,0x0666);
+	list_all(&pwd);
+	int fd = sys_openfile("file2");
+	printf("ok2\n");
+	printf("fd==%d\n",fd);
+	char buffer[]="hello world\n";
+	sys_write(fd,buffer,strlen(buffer));
+	char buf[1024];
+	int num= sys_read(fd,buf,1024);
+	printf("%s  %d\n",buf,num);
+}

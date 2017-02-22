@@ -1,0 +1,71 @@
+#ifndef TOU_H
+#define TOU_H
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
+#include <time.h>
+#define ext2_disk "/home/bei/ext2_you/ext2_disk"
+#include "/home/bei/ext2_you/include/file.h"
+//ext2.c：创建一个新ext2格式的文件，并且在其中初始化引导块，超级块，组描述符，包括其后的inode位图，block位图，inode表，block区域
+//int make_ext2();
+//sys.c :进行系统调用的实现：
+extern struct task_struct task_struct;
+extern struct fs_struct fs_struct;
+extern struct inode root;
+extern struct inode pwd;
+extern struct files_struct files_struct ;
+extern struct file sys_open[100];
+extern struct inode sys_inode[100];
+extern struct file_operations file_operations;
+ void init();//初始化
+extern int get_free_inode();//寻找空余的系统inode
+extern int get_free_file();//寻找空闲的系统file
+extern int get_free_task_file();//寻找进程空闲的fd
+extern int sys_openfile(char *pass);//从磁盘打开文件
+extern int sys_close(int fd);//关闭文件
+extern int sys_create(char *name,int len,int mode);//从磁盘创建文件
+extern int sys_write(int fd,char *buffer,int count);//向文件写buffer
+extern const int find_position(__u32 f_pos,__u32 *num,__u32 *offset);//找到当前文件所在块号域块内偏移
+extern int sys_read(int fd,char *buffer,int count );//读文件内容到buffer
+extern int u_read(struct inode *r_inode,struct file* r_file,char *r_buffer,int count);
+extern int sys_lseek(int fd,int offset,int flag);//修改文件偏移
+extern int u_lseek(struct inode* l_inode,struct file* l_file,int offset,int flag);
+int sys_mkdir (char *name,int len,int mode);
+//ext2_disk.c:实现对磁盘文件的操作，读写block和读写inode 
+int get_block_data(unsigned int  num,char *buffer);
+int set_block_data(unsigned int  num,char *buffer);
+int get_inode_data(unsigned int  num,void * inode);
+extern int set_inode_data(unsigned int  num,void *inode);
+
+//bitmap.c : 关于位图的一些列操作
+extern int get_super_block_data(struct ext2_super_block *super_block);//从磁盘中读取超级快结构存储到super_block中
+extern int set_super_block_data(struct ext2_super_block * super_block);//把super_block设置到磁盘中
+extern int set_bitmap(__u32 *bitmap,int block_num,int flag);//将一个bitmap中的某一位设置为0或1
+extern int get_free_bitmap(__u32 *bitmap);//在位图中寻找一个空闲块或者inode
+extern int get_inode_bitmap(char *bitmap);//从磁盘获得inode位图
+extern int set_inode_bitmap(char *bitmap);//将inode位图保存到磁盘中
+extern int get_block_bitmap(char *bitmap);//从磁盘中获得block位图
+extern int set_block_bitmap(char *bitmap);//将block位图保存到磁盘中
+extern int free_block(int block_num);//释放某一个block，需要将该block位图设置为0
+extern int new_block();//获取一个空的block，并且设置位图为1
+extern int free_inode(int inode_num);//释放一个inode
+extern int new_inode();//获取一个inode
+
+//inode_and_path.c ：实现对文件或者目录的一些操作：
+int name_find_inode(char *path,struct inode* n_inode);
+int namefind_inode(char *path ,__u32 pwd_inodenum);
+int create(struct inode *dir,char *name,int len,int mode);
+int u_mkdir(struct inode* dir,char *name,int len,int mode);
+int list_all(struct inode *dir);
+int delete_file (struct inode *dir,char *name);
+int change_dir(char *name);
+#endif
+
+
+
+
+
+
+
